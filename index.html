@@ -1,4 +1,4 @@
-# test2<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
@@ -24,13 +24,12 @@
 <body>
     <canvas id="gameCanvas" width="400" height="600"></canvas>
     <script>
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
-
+        let canvas;
+        let ctx;
         const gameState = {
             player: {
-                x: canvas.width / 2,
-                y: canvas.height - 50,
+                x: 200,
+                y: 550,
                 width: 40,
                 height: 50,
                 color: '#00fff5'
@@ -234,6 +233,8 @@
         function drawScore() {
             ctx.fillStyle = '#00fff5';
             ctx.font = 'bold 20px Arial';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
             ctx.fillText(`Score: ${gameState.score}`, 20, 30);
         }
 
@@ -312,6 +313,29 @@
             requestAnimationFrame(gameLoop);
         }
 
+        function initGame() {
+            canvas = document.getElementById('gameCanvas');
+            ctx = canvas.getContext('2d');
+            
+            gameState.player.x = canvas.width / 2;
+            gameState.player.y = canvas.height - 50;
+
+            canvas.addEventListener('mousemove', (e) => {
+                if (!gameState.isGameOver) {
+                    const rect = canvas.getBoundingClientRect();
+                    gameState.player.x = e.clientX - rect.left;
+                }
+            });
+
+            canvas.addEventListener('click', () => {
+                if (gameState.isGameOver) {
+                    restartGame();
+                }
+            });
+
+            gameLoop();
+        }
+
         function restartGame() {
             gameState.player.x = canvas.width / 2;
             gameState.bullets = [];
@@ -321,22 +345,12 @@
             gameState.isGameOver = false;
             gameState.score = 0;
             gameState.lastShotTime = 0;
+
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'alphabetic';
         }
 
-        canvas.addEventListener('mousemove', (e) => {
-            if (!gameState.isGameOver) {
-                const rect = canvas.getBoundingClientRect();
-                gameState.player.x = e.clientX - rect.left;
-            }
-        });
-
-        canvas.addEventListener('click', () => {
-            if (gameState.isGameOver) {
-                restartGame();
-            }
-        });
-
-        gameLoop();
+        document.addEventListener('DOMContentLoaded', initGame);
     </script>
 </body>
 </html>
