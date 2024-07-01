@@ -2,8 +2,8 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>スタイリッシュシューティングゲーム</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>スマートフォン向けシューティングゲーム</title>
     <style>
         body {
             background-color: #000;
@@ -13,6 +13,8 @@
             height: 100vh;
             margin: 0;
             font-family: 'Arial', sans-serif;
+            overflow: hidden;
+            touch-action: none;
         }
         #gameCanvas {
             border: 2px solid #16213e;
@@ -22,16 +24,16 @@
     </style>
 </head>
 <body>
-    <canvas id="gameCanvas" width="400" height="600"></canvas>
+    <canvas id="gameCanvas"></canvas>
     <script>
         let canvas;
         let ctx;
         const gameState = {
             player: {
-                x: 200,
-                y: 550,
-                width: 40,
-                height: 50,
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 0,
                 color: '#00fff5'
             },
             bullets: [],
@@ -56,22 +58,22 @@
         function createBackgroundPattern() {
             const patternCanvas = document.createElement('canvas');
             const patternContext = patternCanvas.getContext('2d');
-            patternCanvas.width = 400;
-            patternCanvas.height = 600;
+            patternCanvas.width = canvas.width;
+            patternCanvas.height = canvas.height;
             
-            const gradient = patternContext.createLinearGradient(0, 0, 0, 600);
+            const gradient = patternContext.createLinearGradient(0, 0, 0, canvas.height);
             gradient.addColorStop(0, "#000033");
             gradient.addColorStop(1, "#000066");
             
             patternContext.fillStyle = gradient;
-            patternContext.fillRect(0, 0, 400, 600);
+            patternContext.fillRect(0, 0, canvas.width, canvas.height);
             
             for (let i = 0; i < 100; i++) {
                 patternContext.fillStyle = "white";
                 patternContext.beginPath();
                 patternContext.arc(
-                    Math.random() * 400,
-                    Math.random() * 600,
+                    Math.random() * canvas.width,
+                    Math.random() * canvas.height,
                     Math.random() * 2,
                     0,
                     Math.PI * 2
@@ -82,7 +84,7 @@
             return patternCanvas;
         }
 
-        const backgroundPattern = createBackgroundPattern();
+        let backgroundPattern;
 
         function drawBackground() {
             ctx.drawImage(backgroundPattern, 0, 0);
@@ -139,7 +141,7 @@
             ctx.fillStyle = '#ff4766';
             gameState.bullets.forEach(bullet => {
                 ctx.beginPath();
-                ctx.arc(bullet.x, bullet.y, 3, 0, Math.PI * 2);
+                ctx.arc(bullet.x, bullet.y, canvas.width * 0.01, 0, Math.PI * 2);
                 ctx.fill();
             });
         }
@@ -185,14 +187,15 @@
         }
 
         function spawnEnemy() {
-            if (Math.random() < 0.1) {
+            if (Math.random() < 0.03) {
                 const enemyType = enemyTypes[Math.floor(Math.random() * enemyTypes.length)];
+                const size = canvas.width * (enemyType.size / 400);
                 gameState.enemies.push({
                     x: Math.random() * canvas.width,
                     y: 0,
-                    width: enemyType.size,
-                    height: enemyType.size,
-                    speed: Math.random() * 3 + 2,
+                    width: size,
+                    height: size,
+                    speed: (Math.random() * 3 + 2) * (canvas.height / 600),
                     color: enemyType.color,
                     score: enemyType.score
                 });
@@ -232,19 +235,19 @@
 
         function drawScore() {
             ctx.fillStyle = '#00fff5';
-            ctx.font = 'bold 20px Arial';
+            ctx.font = `bold ${canvas.width * 0.05}px Arial`;
             ctx.textAlign = 'left';
             ctx.textBaseline = 'top';
-            ctx.fillText(`Score: ${gameState.score}`, 20, 30);
+            ctx.fillText(`Score: ${gameState.score}`, canvas.width * 0.05, canvas.height * 0.05);
         }
 
         function drawScoreDisplays() {
-            ctx.font = 'bold 16px Arial';
+            ctx.font = `bold ${canvas.width * 0.04}px Arial`;
             for (let i = gameState.scoreDisplays.length - 1; i >= 0; i--) {
                 const display = gameState.scoreDisplays[i];
                 ctx.fillStyle = `rgba(255, 255, 255, ${1 - display.age / 60})`;
                 ctx.fillText(`+${display.score}`, display.x, display.y);
-                display.y -= 0.5;
+                display.y -= canvas.height * 0.001;
                 display.age++;
                 if (display.age > 60) {
                     gameState.scoreDisplays.splice(i, 1);
@@ -253,12 +256,12 @@
         }
 
         function drawPenaltyScores() {
-            ctx.font = 'bold 16px Arial';
+            ctx.font = `bold ${canvas.width * 0.04}px Arial`;
             for (let i = gameState.penaltyScores.length - 1; i >= 0; i--) {
                 const penalty = gameState.penaltyScores[i];
                 ctx.fillStyle = `rgba(255, 0, 0, ${1 - penalty.age / 60})`;
                 ctx.fillText(`-${penalty.score}`, penalty.x, penalty.y);
-                penalty.y -= 0.5;
+                penalty.y -= canvas.height * 0.001;
                 penalty.age++;
                 if (penalty.age > 60) {
                     gameState.penaltyScores.splice(i, 1);
@@ -270,17 +273,17 @@
             ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             ctx.fillStyle = '#00fff5';
-            ctx.font = 'bold 40px Arial';
+            ctx.font = `bold ${canvas.width * 0.1}px Arial`;
             ctx.textAlign = 'center';
             ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2);
-            ctx.font = 'bold 20px Arial';
-            ctx.fillText(`Final Score: ${gameState.score}`, canvas.width / 2, canvas.height / 2 + 40);
-            ctx.fillText('Click to Restart', canvas.width / 2, canvas.height / 2 + 80);
+            ctx.font = `bold ${canvas.width * 0.05}px Arial`;
+            ctx.fillText(`Final Score: ${gameState.score}`, canvas.width / 2, canvas.height / 2 + canvas.height * 0.1);
+            ctx.fillText('Tap to Restart', canvas.width / 2, canvas.height / 2 + canvas.height * 0.2);
         }
 
         function autoShoot() {
             const currentTime = Date.now();
-            if (currentTime - gameState.lastShotTime >= 100) {
+            if (currentTime - gameState.lastShotTime >= 250) {
                 gameState.bullets.push({
                     x: gameState.player.x,
                     y: gameState.player.y - gameState.player.height / 2
@@ -317,17 +320,31 @@
             canvas = document.getElementById('gameCanvas');
             ctx = canvas.getContext('2d');
             
+            // キャンバスサイズを画面サイズに合わせる
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            
+            // プレイヤーのサイズを画面サイズに合わせて調整
+            gameState.player.width = canvas.width * 0.1;
+            gameState.player.height = canvas.width * 0.125;
+            
             gameState.player.x = canvas.width / 2;
-            gameState.player.y = canvas.height - 50;
+            gameState.player.y = canvas.height - gameState.player.height;
 
-            canvas.addEventListener('mousemove', (e) => {
+            // 背景パターンを作成
+            backgroundPattern = createBackgroundPattern();
+
+            canvas.addEventListener('touchmove', (e) => {
+                e.preventDefault();
                 if (!gameState.isGameOver) {
+                    const touch = e.touches[0];
                     const rect = canvas.getBoundingClientRect();
-                    gameState.player.x = e.clientX - rect.left;
+                    gameState.player.x = touch.clientX - rect.left;
                 }
             });
 
-            canvas.addEventListener('click', () => {
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault();
                 if (gameState.isGameOver) {
                     restartGame();
                 }
@@ -338,19 +355,4 @@
 
         function restartGame() {
             gameState.player.x = canvas.width / 2;
-            gameState.bullets = [];
-            gameState.enemies = [];
-            gameState.scoreDisplays = [];
-            gameState.penaltyScores = [];
-            gameState.isGameOver = false;
-            gameState.score = 0;
-            gameState.lastShotTime = 0;
-
-            ctx.textAlign = 'left';
-            ctx.textBaseline = 'alphabetic';
-        }
-
-        document.addEventListener('DOMContentLoaded', initGame);
-    </script>
-</body>
-</html>
+            gameState.bullets
