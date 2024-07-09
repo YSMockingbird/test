@@ -324,7 +324,7 @@
 
         function movePowerUps() {
             gameState.powerUps.forEach(powerUp => {
-                powerUp.y += powerUp.speed * 1.5;
+                powerUp.y += powerUp.speed * 2.5;
             });
             gameState.powerUps = gameState.powerUps.filter(powerUp => powerUp.y <= canvas.height);
         }
