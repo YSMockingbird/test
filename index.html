@@ -41,7 +41,10 @@
             bulletSpeed: 7,
             isGameOver: false,
             score: 0,
-            lastShotTime: 0
+            lastShotTime: 0,
+            powerUps: [],
+            powerUpActive: false,
+            powerUpEndTime: 0
         };
 
         const enemyTypes = [
@@ -289,6 +292,74 @@
             }
         }
 
+        function spawnPowerUp() {
+            if (Math.random() < 0.001) { // 敵の出現頻度の約1/100
+                gameState.powerUps.push({
+                    x: Math.random() * canvas.width,
+                    y: 0,
+                    width: 20,
+                    height: 20,
+                    speed: Math.random() * 2 + 1
+                });
+            }
+        }
+
+        function drawPowerUps() {
+            ctx.fillStyle = 'white';
+            ctx.strokeStyle = 'cyan';
+            gameState.powerUps.forEach(powerUp => {
+                ctx.beginPath();
+                ctx.arc(powerUp.x, powerUp.y, powerUp.width / 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+                
+                // "P" の文字を描画
+                ctx.fillStyle = 'blue';
+                ctx.font = 'bold 14px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('P', powerUp.x, powerUp.y);
+            });
+        }
+
+        function movePowerUps() {
+            gameState.powerUps.forEach(powerUp => {
+                powerUp.y += powerUp.speed;
+            });
+            gameState.powerUps = gameState.powerUps.filter(powerUp => powerUp.y <= canvas.height);
+        }
+
+        function checkPowerUpCollisions() {
+            for (let i = gameState.powerUps.length - 1; i >= 0; i--) {
+                const powerUp = gameState.powerUps[i];
+                if (gameState.player.x - gameState.player.width / 2 < powerUp.x + powerUp.width / 2 &&
+                    gameState.player.x + gameState.player.width / 2 > powerUp.x - powerUp.width / 2 &&
+                    gameState.player.y - gameState.player.height / 2 < powerUp.y + powerUp.height / 2 &&
+                    gameState.player.y + gameState.player.height / 2 > powerUp.y - powerUp.height / 2) {
+                    gameState.powerUps.splice(i, 1);
+                    gameState.powerUpActive = true;
+                    gameState.powerUpEndTime = Date.now() + 10000; // 10秒間
+                }
+            }
+        }
+
+        function autoShoot() {
+            const currentTime = Date.now();
+            const shootInterval = gameState.powerUpActive ? 10 : 100; // パワーアップ中は10ms間隔で発射
+            if (currentTime - gameState.lastShotTime >= shootInterval) {
+                gameState.bullets.push({
+                    x: gameState.player.x,
+                    y: gameState.player.y - gameState.player.height / 2
+                });
+                gameState.lastShotTime = currentTime;
+            }
+        
+            // パワーアップの終了チェック
+            if (gameState.powerUpActive && currentTime > gameState.powerUpEndTime) {
+                gameState.powerUpActive = false;
+            }
+        }
+        
         function gameLoop() {
             drawBackground();
             
@@ -299,6 +370,9 @@
                 spawnEnemy();
                 checkCollisions();
                 autoShoot();
+                movePowerUps(); // 追加
+                spawnPowerUp(); // 追加
+                checkPowerUpCollisions(); // 追加
 
                 drawPlayer();
                 drawBullets();
@@ -306,6 +380,7 @@
                 drawScore();
                 drawScoreDisplays();
                 drawPenaltyScores();
+                drawPowerUps(); // 追加
             } else {
                 drawGameOver();
             }
@@ -345,6 +420,9 @@
             gameState.isGameOver = false;
             gameState.score = 0;
             gameState.lastShotTime = 0;
+            gameState.powerUps = [];
+            gameState.powerUpActive = false;
+            gameState.powerUpEndTime = 0;
 
             ctx.textAlign = 'left';
             ctx.textBaseline = 'alphabetic';
