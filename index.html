@@ -299,7 +299,7 @@
                     y: 0,
                     width: 20,
                     height: 20,
-                    speed: Math.random() * 3 + 2
+                    speed: Math.random() * 4 + 3
                 });
             }
         }
@@ -324,7 +324,7 @@
 
         function movePowerUps() {
             gameState.powerUps.forEach(powerUp => {
-                powerUp.y += powerUp.speed * 2.5;
+                powerUp.y += powerUp.speed;
             });
             gameState.powerUps = gameState.powerUps.filter(powerUp => powerUp.y <= canvas.height);
         }
