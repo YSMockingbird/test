@@ -24,6 +24,7 @@
 <body>
     <canvas id="gameCanvas" width="400" height="600"></canvas>
     <script>
+        // --- Constants and Game State ---
         let canvas;
         let ctx;
         const gameState = {
@@ -44,17 +45,99 @@
             lastShotTime: 0,
             powerUps: [],
             powerUpActive: false,
-            powerUpEndTime: 0
+            powerUpEndTime: 0,
+            particles: [], 
+            isShaking: false, 
+            shakeStartTime: 0, 
+            shakeDuration: 200, 
+            shakeMagnitude: 5, 
+            enemyBullets: [], 
+            playerShieldActive: false, 
+            lastSoundTime: {}, 
+            boss: null,
+            bossAppearanceScore: 300, 
         };
 
-        const enemyTypes = [
-            { color: 'red', score: 20, size: 20 },
-            { color: 'blue', score: 18, size: 24 },
-            { color: 'purple', score: 16, size: 28 },
-            { color: 'orange', score: 14, size: 32 },
-            { color: 'yellow', score: 12, size: 36 },
-            { color: 'green', score: 10, size: 40 }
+        const powerUpTypes = [
+            { type: 'rapidFire', color: 'white', letter: 'P', duration: 6000, description: "Rapid Fire" },
+            { type: 'shield', color: '#4682B4', letter: 'S', description: "Shield" }, 
+            { type: 'bomb', color: '#FFD700', letter: 'B', description: "Screen Clear Bomb" } 
         ];
+
+        const enemyTypes = [
+            { type: 'normal', color: 'red', score: 20, size: 20, speedBase: 2, speedRange: 3 },
+            { type: 'normal', color: 'blue', score: 18, size: 24, speedBase: 2, speedRange: 3 },
+            { type: 'normal', color: 'purple', score: 16, size: 28, speedBase: 1.5, speedRange: 2.5 },
+            { type: 'normal', color: 'orange', score: 14, size: 32, speedBase: 1.5, speedRange: 2.5 },
+            { type: 'normal', color: 'yellow', score: 12, size: 36, speedBase: 1, speedRange: 2 },
+            { type: 'normal', color: 'green', score: 10, size: 40, speedBase: 1, speedRange: 2 },
+            { type: 'shooter', color: '#FF69B4', score: 30, size: 30, speedBase: 1, speedRange: 1, shoots: true, fireRate: 2000 }, 
+            { type: 'sinusoidal', color: '#7FFF00', score: 25, size: 25, speedBase: 1.5, speedRange: 1, movementPattern: 'sine', amplitude: 50, frequency: 0.05 } 
+        ];
+        
+        let audioCtx; 
+        const backgroundPattern = createBackgroundPattern(); // Create pattern once after function is defined
+
+        // --- Initialization Functions ---
+        function initGame() {
+            canvas = document.getElementById('gameCanvas');
+            ctx = canvas.getContext('2d');
+            initAudio(); 
+            
+            gameState.player.x = canvas.width / 2;
+            gameState.player.y = canvas.height - 50;
+
+            canvas.addEventListener('mousemove', (e) => {
+                if (!gameState.isGameOver) {
+                    const rect = canvas.getBoundingClientRect();
+                    gameState.player.x = e.clientX - rect.left;
+                }
+            });
+
+            canvas.addEventListener('click', () => {
+                if (audioCtx && audioCtx.state === 'suspended') {
+                    audioCtx.resume().catch(e => console.error("Error resuming AudioContext:", e));
+                }
+                if (gameState.isGameOver) {
+                    restartGame();
+                }
+            });
+
+            gameLoop();
+        }
+
+        function restartGame() {
+            gameState.player.x = canvas.width / 2;
+            gameState.bullets = [];
+            gameState.enemies = [];
+            gameState.scoreDisplays = [];
+            gameState.penaltyScores = [];
+            gameState.isGameOver = false;
+            gameState.score = 0;
+            gameState.lastShotTime = 0;
+            gameState.powerUps = [];
+            gameState.powerUpActive = false, 
+            gameState.powerUpEndTime = 0,
+            gameState.playerShieldActive = false, 
+            gameState.particles = [], 
+            gameState.isShaking = false, 
+            gameState.enemyBullets = [], 
+            gameState.lastSoundTime = {}; 
+            gameState.boss = null; 
+
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'alphabetic';
+        }
+        
+        function initAudio() {
+            if (!audioCtx) {
+                try {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                } catch (e) {
+                    console.error("Web Audio API is not supported in this browser.", e);
+                }
+            }
+        }
 
         function createBackgroundPattern() {
             const patternCanvas = document.createElement('canvas');
@@ -81,21 +164,82 @@
                 );
                 patternContext.fill();
             }
-            
             return patternCanvas;
         }
 
-        const backgroundPattern = createBackgroundPattern();
+        // --- Core Game Loop ---
+        function gameLoop() {
+            ctx.save(); 
 
-        function drawBackground() {
+            if (gameState.isShaking) {
+                const elapsedTime = Date.now() - gameState.shakeStartTime;
+                if (elapsedTime < gameState.shakeDuration) {
+                    const offsetX = (Math.random() - 0.5) * gameState.shakeMagnitude * 2;
+                    const offsetY = (Math.random() - 0.5) * gameState.shakeMagnitude * 2;
+                    ctx.translate(offsetX, offsetY);
+                } else {
+                    gameState.isShaking = false;
+                }
+            }
+
+            drawBackground();
+            
+            if (!gameState.isGameOver) {
+                if (gameState.score >= gameState.bossAppearanceScore && (!gameState.boss || !gameState.boss.active)) {
+                    spawnBoss();
+                }
+
+                moveBullets();
+                if (gameState.boss && gameState.boss.active) {
+                    moveBoss(); 
+                } else if (!gameState.boss) { 
+                    moveEnemies();
+                    spawnEnemy(); 
+                }
+                
+                checkEscapedEnemies(); 
+                moveEnemyBullets(); 
+                moveParticles(); 
+                checkCollisions(); 
+                autoShoot();
+                movePowerUps(); 
+                spawnPowerUp(); 
+                checkPowerUpCollisions(); 
+
+                drawPlayer();
+                drawBullets();
+                drawEnemyBullets(); 
+                
+                if (gameState.boss && gameState.boss.active) {
+                    drawBoss();
+                } else if (!gameState.boss) { 
+                    drawEnemies();
+                }
+                drawParticles(); 
+                drawScore();
+                drawScoreDisplays();
+                drawPenaltyScores();
+                drawPowerUps(); 
+            } else {
+                if (ctx.getTransform().e !== 0 || ctx.getTransform().f !== 0) {
+                     ctx.restore(); 
+                     ctx.save(); 
+                }
+                drawGameOver();
+            }
+            
+            ctx.restore(); 
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- Drawing Functions ---
+        function drawBackground() { // Already defined in Initialization, but listed here in prompt
             ctx.drawImage(backgroundPattern, 0, 0);
         }
 
         function drawPlayer() {
             ctx.save();
             ctx.translate(gameState.player.x, gameState.player.y);
-
-            // メインボディ
             ctx.fillStyle = gameState.player.color;
             ctx.beginPath();
             ctx.moveTo(0, -gameState.player.height / 2);
@@ -103,8 +247,13 @@
             ctx.lineTo(gameState.player.width / 2, gameState.player.height / 2);
             ctx.closePath();
             ctx.fill();
-
-            // ウィング
+            if (gameState.playerShieldActive) {
+                ctx.strokeStyle = '#00BFFF'; 
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(0, 0, gameState.player.width * 0.75, 0, Math.PI * 2); 
+                ctx.stroke();
+            }
             ctx.fillStyle = '#0099cc';
             ctx.beginPath();
             ctx.moveTo(-gameState.player.width / 2, gameState.player.height / 4);
@@ -112,21 +261,16 @@
             ctx.lineTo(-gameState.player.width / 2, gameState.player.height / 2);
             ctx.closePath();
             ctx.fill();
-
             ctx.beginPath();
             ctx.moveTo(gameState.player.width / 2, gameState.player.height / 4);
             ctx.lineTo(gameState.player.width * 0.7, gameState.player.height / 2);
             ctx.lineTo(gameState.player.width / 2, gameState.player.height / 2);
             ctx.closePath();
             ctx.fill();
-
-            // コックピット
             ctx.fillStyle = '#ffffff';
             ctx.beginPath();
             ctx.ellipse(0, -gameState.player.height / 6, gameState.player.width / 6, gameState.player.height / 8, 0, 0, Math.PI * 2);
             ctx.fill();
-
-            // エンジンの光
             ctx.fillStyle = '#ff9900';
             ctx.beginPath();
             ctx.moveTo(-gameState.player.width / 4, gameState.player.height / 2);
@@ -134,7 +278,6 @@
             ctx.lineTo(gameState.player.width / 4, gameState.player.height / 2);
             ctx.closePath();
             ctx.fill();
-
             ctx.restore();
         }
 
@@ -148,89 +291,72 @@
         }
 
         function drawEnemies() {
+            if (gameState.boss && gameState.boss.active) { return; } 
             gameState.enemies.forEach(enemy => {
                 ctx.fillStyle = enemy.color;
                 ctx.beginPath();
-                ctx.moveTo(enemy.x - enemy.width / 2, enemy.y - enemy.height / 2);
-                ctx.lineTo(enemy.x + enemy.width / 2, enemy.y - enemy.height / 2);
-                ctx.lineTo(enemy.x, enemy.y + enemy.height / 2);
+                if (enemy.type === 'shooter') {
+                    ctx.moveTo(enemy.x, enemy.y - enemy.height / 2); 
+                    ctx.lineTo(enemy.x + enemy.width / 2, enemy.y); 
+                    ctx.lineTo(enemy.x, enemy.y + enemy.height / 2); 
+                    ctx.lineTo(enemy.x - enemy.width / 2, enemy.y); 
+                } else if (enemy.type === 'sinusoidal') {
+                    ctx.rect(enemy.x - enemy.width / 2, enemy.y - enemy.height / 2, enemy.width, enemy.height);
+                    ctx.strokeStyle = 'white';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(enemy.x - enemy.width / 2, enemy.y);
+                    ctx.quadraticCurveTo(enemy.x, enemy.y - enemy.height / 4, enemy.x + enemy.width/2, enemy.y);
+                    ctx.stroke();
+                } else {
+                    ctx.moveTo(enemy.x - enemy.width / 2, enemy.y - enemy.height / 2);
+                    ctx.lineTo(enemy.x + enemy.width / 2, enemy.y - enemy.height / 2);
+                    ctx.lineTo(enemy.x, enemy.y + enemy.height / 2);
+                }
                 ctx.closePath();
                 ctx.fill();
             });
         }
 
-        function moveBullets() {
-            gameState.bullets.forEach(bullet => {
-                bullet.y -= gameState.bulletSpeed;
-            });
-            gameState.bullets = gameState.bullets.filter(bullet => bullet.y > 0);
-        }
-
-        function moveEnemies() {
-            gameState.enemies.forEach(enemy => {
-                enemy.y += enemy.speed;
+        function drawEnemyBullets() {
+            ctx.fillStyle = '#FF0000'; 
+            gameState.enemyBullets.forEach(bullet => {
+                ctx.fillRect(bullet.x - bullet.width / 2, bullet.y - bullet.height / 2, bullet.width, bullet.height);
             });
         }
 
-        function checkEscapedEnemies() {
-            const escapedEnemies = gameState.enemies.filter(enemy => enemy.y > canvas.height);
-            escapedEnemies.forEach(enemy => {
-                const penaltyScore = 5;
-                gameState.score = Math.max(0, gameState.score - penaltyScore);
-                gameState.penaltyScores.push({
-                    x: enemy.x,
-                    y: canvas.height,
-                    score: penaltyScore,
-                    age: 0
-                });
+        function drawPowerUps() {
+            gameState.powerUps.forEach(powerUp => {
+                ctx.fillStyle = powerUp.color;
+                ctx.strokeStyle = 'white'; 
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(powerUp.x, powerUp.y, powerUp.width / 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+                ctx.fillStyle = (powerUp.type === 'bomb' || powerUp.type === 'shield' || powerUp.type === 'rapidFire') ? 'black' : 'blue'; 
+                ctx.font = 'bold 14px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(powerUp.letter, powerUp.x, powerUp.y);
             });
-            gameState.enemies = gameState.enemies.filter(enemy => enemy.y <= canvas.height);
         }
-
-        function spawnEnemy() {
-            if (Math.random() < 0.1) {
-                const enemyType = enemyTypes[Math.floor(Math.random() * enemyTypes.length)];
-                gameState.enemies.push({
-                    x: Math.random() * canvas.width,
-                    y: 0,
-                    width: enemyType.size,
-                    height: enemyType.size,
-                    speed: Math.random() * 3 + 2,
-                    color: enemyType.color,
-                    score: enemyType.score
-                });
+        
+        function drawBoss() {
+            if (gameState.boss && gameState.boss.active) {
+                const boss = gameState.boss;
+                ctx.fillStyle = boss.color;
+                ctx.fillRect(boss.x - boss.width / 2, boss.y - boss.height / 2, boss.width, boss.height);
+                const healthBarWidth = boss.width;
+                const healthBarHeight = 10;
+                const healthBarX = boss.x - healthBarWidth / 2;
+                const healthBarY = boss.y - boss.height / 2 - healthBarHeight - 5; 
+                ctx.fillStyle = '#555'; 
+                ctx.fillRect(healthBarX, healthBarY, healthBarWidth, healthBarHeight);
+                const currentHealthWidth = healthBarWidth * (boss.hp / boss.maxHp);
+                ctx.fillStyle = 'red'; 
+                ctx.fillRect(healthBarX, healthBarY, currentHealthWidth, healthBarHeight);
             }
-        }
-
-        function checkCollisions() {
-            for (let i = gameState.bullets.length - 1; i >= 0; i--) {
-                const bullet = gameState.bullets[i];
-                for (let j = gameState.enemies.length - 1; j >= 0; j--) {
-                    const enemy = gameState.enemies[j];
-                    if (bullet.x > enemy.x - enemy.width / 2 && bullet.x < enemy.x + enemy.width / 2 &&
-                        bullet.y > enemy.y - enemy.height / 2 && bullet.y < enemy.y + enemy.height / 2) {
-                        gameState.enemies.splice(j, 1);
-                        gameState.bullets.splice(i, 1);
-                        gameState.score += enemy.score;
-                        gameState.scoreDisplays.push({
-                            x: enemy.x,
-                            y: enemy.y,
-                            score: enemy.score,
-                            age: 0
-                        });
-                        break;
-                    }
-                }
-            }
-
-            gameState.enemies.forEach(enemy => {
-                if (gameState.player.x - gameState.player.width / 2 < enemy.x + enemy.width / 2 &&
-                    gameState.player.x + gameState.player.width / 2 > enemy.x - enemy.width / 2 &&
-                    gameState.player.y - gameState.player.height / 2 < enemy.y + enemy.height / 2 &&
-                    gameState.player.y + gameState.player.height / 2 > enemy.y - enemy.height / 2) {
-                    gameState.isGameOver = true;
-                }
-            });
         }
 
         function drawScore() {
@@ -269,6 +395,15 @@
             }
         }
 
+        function drawParticles() {
+            gameState.particles.forEach(p => {
+                ctx.fillStyle = `rgba(${hexToRgb(p.color).r}, ${hexToRgb(p.color).g}, ${hexToRgb(p.color).b}, ${p.life / 60})`;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); 
+                ctx.fill();
+            });
+        }
+
         function drawGameOver() {
             ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -281,45 +416,42 @@
             ctx.fillText('Click to Restart', canvas.width / 2, canvas.height / 2 + 80);
         }
 
-        function autoShoot() {
-            const currentTime = Date.now();
-            if (currentTime - gameState.lastShotTime >= 100) {
-                gameState.bullets.push({
-                    x: gameState.player.x,
-                    y: gameState.player.y - gameState.player.height / 2
-                });
-                gameState.lastShotTime = currentTime;
-            }
-        }
-
-        function spawnPowerUp() {
-            if (Math.random() < 0.001) { // 敵の出現頻度の約1/100
-                gameState.powerUps.push({
-                    x: Math.random() * canvas.width,
-                    y: 0,
-                    width: 20,
-                    height: 20,
-                    speed: Math.random() * 4 + 3
-                });
-            }
-        }
-
-        function drawPowerUps() {
-            ctx.fillStyle = 'white';
-            ctx.strokeStyle = 'cyan';
-            gameState.powerUps.forEach(powerUp => {
-                ctx.beginPath();
-                ctx.arc(powerUp.x, powerUp.y, powerUp.width / 2, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.stroke();
-                
-                // "P" の文字を描画
-                ctx.fillStyle = 'blue';
-                ctx.font = 'bold 14px Arial';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText('P', powerUp.x, powerUp.y);
+        // --- Movement, Spawning, and Action Functions ---
+        function moveBullets() {
+            gameState.bullets.forEach(bullet => {
+                bullet.y -= gameState.bulletSpeed;
             });
+            gameState.bullets = gameState.bullets.filter(bullet => bullet.y > 0);
+        }
+
+        function moveEnemies() {
+            gameState.enemies.forEach(enemy => {
+                enemy.y += enemy.speed;
+                if (enemy.type === 'sinusoidal') {
+                    enemy.x = enemy.baseX + Math.sin(enemy.y * enemy.frequency) * enemy.amplitude;
+                    if (enemy.x - enemy.width / 2 < 0) {
+                        enemy.x = enemy.width / 2;
+                        enemy.baseX = enemy.x; 
+                    } else if (enemy.x + enemy.width / 2 > canvas.width) {
+                        enemy.x = canvas.width - enemy.width / 2;
+                        enemy.baseX = enemy.x; 
+                    }
+                }
+                if (enemy.shoots) {
+                    enemyShoot(enemy);
+                }
+            });
+        }
+        
+        function moveEnemyBullets() {
+            for (let i = gameState.enemyBullets.length - 1; i >= 0; i--) {
+                const bullet = gameState.enemyBullets[i];
+                bullet.x += bullet.speedX;
+                bullet.y += bullet.speedY;
+                if (bullet.y > canvas.height || bullet.y < 0 || bullet.x < 0 || bullet.x > canvas.width) {
+                    gameState.enemyBullets.splice(i, 1);
+                }
+            }
         }
 
         function movePowerUps() {
@@ -329,6 +461,303 @@
             gameState.powerUps = gameState.powerUps.filter(powerUp => powerUp.y <= canvas.height);
         }
 
+        function moveBoss() {
+            if (gameState.boss && gameState.boss.active) {
+                const boss = gameState.boss;
+                boss.x += boss.speed * boss.dx;
+                if (boss.x + boss.width / 2 > canvas.width || boss.x - boss.width / 2 < 0) {
+                    boss.dx *= -1;
+                }
+            }
+        }
+        
+        function spawnEnemy() {
+            if (gameState.boss && gameState.boss.active) { return; } 
+            if (Math.random() < 0.07) { 
+                const enemyTypeDefinition = enemyTypes[Math.floor(Math.random() * enemyTypes.length)];
+                const newEnemy = {
+                    x: Math.random() * (canvas.width - enemyTypeDefinition.size) + enemyTypeDefinition.size / 2, 
+                    y: 0,
+                    width: enemyTypeDefinition.size,
+                    height: enemyTypeDefinition.size,
+                    speed: Math.random() * enemyTypeDefinition.speedRange + enemyTypeDefinition.speedBase,
+                    color: enemyTypeDefinition.color,
+                    score: enemyTypeDefinition.score,
+                    type: enemyTypeDefinition.type || 'normal', 
+                    shoots: enemyTypeDefinition.shoots || false,
+                    fireRate: enemyTypeDefinition.fireRate || 2000, 
+                    lastShotTime: 0,
+                    movementPattern: enemyTypeDefinition.movementPattern || 'linear',
+                    amplitude: enemyTypeDefinition.amplitude || 50,
+                    frequency: enemyTypeDefinition.frequency || 0.05,
+                    baseX: 0 
+                };
+                if (newEnemy.type === 'sinusoidal') {
+                    newEnemy.baseX = newEnemy.x;
+                }
+                if (newEnemy.type === 'shooter') {
+                    newEnemy.lastShotTime = Date.now(); 
+                }
+                gameState.enemies.push(newEnemy);
+            }
+        }
+
+        function enemyShoot(enemy) {
+            const currentTime = Date.now();
+            if (currentTime - enemy.lastShotTime >= enemy.fireRate) {
+                const bulletSpeed = 5; 
+                const dx = (gameState.player.x) - enemy.x;
+                const dy = (gameState.player.y - gameState.player.height/2) - enemy.y; 
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                gameState.enemyBullets.push({
+                    x: enemy.x,
+                    y: enemy.y + enemy.height / 2, 
+                    width: 5,
+                    height: 10,
+                    color: '#FF0000', 
+                    speedX: (dx / distance) * bulletSpeed,
+                    speedY: (dy / distance) * bulletSpeed
+                });
+                enemy.lastShotTime = currentTime;
+            }
+        }
+
+        function spawnPowerUp() {
+            if (Math.random() < 0.008) { 
+                const powerUpDefinition = powerUpTypes[Math.floor(Math.random() * powerUpTypes.length)];
+                gameState.powerUps.push({
+                    x: Math.random() * (canvas.width - 20) + 10, 
+                    y: 0,
+                    width: 20,
+                    height: 20,
+                    speed: Math.random() * 2 + 1, 
+                    type: powerUpDefinition.type,
+                    color: powerUpDefinition.color,
+                    letter: powerUpDefinition.letter,
+                    duration: powerUpDefinition.duration 
+                });
+            }
+        }
+        
+        function spawnBoss() {
+            gameState.boss = {
+                active: true,
+                x: canvas.width / 2,
+                y: 100,
+                width: 100,
+                height: 80,
+                maxHp: 500,
+                hp: 500,
+                color: 'darkred',
+                patternTimer: 0,
+                currentPattern: 0,
+                speed: 1, 
+                dx: 1 
+            };
+        }
+
+        function autoShoot() {
+            const currentTime = Date.now();
+            const shootInterval = gameState.powerUpActive ? 10 : 100; 
+            if (currentTime - gameState.lastShotTime >= shootInterval) {
+                gameState.bullets.push({
+                    x: gameState.player.x,
+                    y: gameState.player.y - gameState.player.height / 2
+                });
+                gameState.lastShotTime = currentTime;
+                playShootSound(); 
+            }
+            if (gameState.powerUpActive && currentTime > gameState.powerUpEndTime) {
+                gameState.powerUpActive = false;
+            }
+        }
+        
+        function createParticles(x, y, color, countMultiplier = 1) { 
+            const baseParticleCount = Math.floor(Math.random() * 5) + 5; 
+            const numParticles = baseParticleCount * countMultiplier; 
+            for (let i = 0; i < numParticles; i++) {
+                gameState.particles.push({
+                    x: x,
+                    y: y,
+                    size: Math.random() * 3 + 1, 
+                    speedX: (Math.random() - 0.5) * 4,
+                    speedY: (Math.random() - 0.5) * 4,
+                    color: color,
+                    life: Math.random() * 30 + 30 
+                });
+            }
+        }
+        
+        function moveParticles() { // This was already in the correct logical group per previous thoughts
+            for (let i = gameState.particles.length - 1; i >= 0; i--) {
+                const p = gameState.particles[i];
+                p.x += p.speedX;
+                p.y += p.speedY;
+                p.life--;
+                if (p.life <= 0) {
+                    gameState.particles.splice(i, 1);
+                }
+            }
+        }
+
+        // --- Collision Detection ---
+        function checkCollisions() {
+            // Player bullets vs Enemies
+            for (let i = gameState.bullets.length - 1; i >= 0; i--) {
+                const bullet = gameState.bullets[i];
+                for (let j = gameState.enemies.length - 1; j >= 0; j--) {
+                    const enemy = gameState.enemies[j];
+                    if (bullet.x > enemy.x - enemy.width / 2 && bullet.x < enemy.x + enemy.width / 2 &&
+                        bullet.y > enemy.y - enemy.height / 2 && bullet.y < enemy.y + enemy.height / 2) {
+                        createParticles(enemy.x, enemy.y, enemy.color);
+                        playExplosionSound();
+                        gameState.enemies.splice(j, 1);
+                        gameState.bullets.splice(i, 1);
+                        gameState.score += enemy.score;
+                        gameState.scoreDisplays.push({
+                            x: enemy.x,
+                            y: enemy.y,
+                            score: enemy.score,
+                            age: 0
+                        });
+                        break; 
+                    }
+                }
+            }
+
+            // Player bullets vs Boss
+            if (gameState.boss && gameState.boss.active) {
+                const boss = gameState.boss;
+                for (let i = gameState.bullets.length - 1; i >= 0; i--) {
+                    const bullet = gameState.bullets[i];
+                    if (bullet.x >= boss.x - boss.width / 2 &&
+                        bullet.x <= boss.x + boss.width / 2 &&
+                        bullet.y >= boss.y - boss.height / 2 &&
+                        bullet.y <= boss.y + boss.height / 2) {
+                        
+                        gameState.bullets.splice(i, 1); 
+                        boss.hp -= 1; 
+                        playBossHitSound(); 
+                        
+                        if (boss.hp <= 0) {
+                            gameState.score += 500; 
+                            boss.active = false;    
+                            createParticles(boss.x, boss.y, boss.color, 5); 
+                            gameState.isShaking = true;
+                            gameState.shakeStartTime = Date.now();
+                            gameState.shakeDuration = 300; 
+                            gameState.shakeMagnitude = 5;
+                            gameState.boss = null; 
+                            break; 
+                        }
+                        break; 
+                    }
+                }
+            }
+
+            // Player vs Enemies
+            gameState.enemies.forEach(enemy => {
+                if (gameState.player.x - gameState.player.width / 2 < enemy.x + enemy.width / 2 &&
+                    gameState.player.x + gameState.player.width / 2 > enemy.x - enemy.width / 2 &&
+                    gameState.player.y - gameState.player.height / 2 < enemy.y + enemy.height / 2 &&
+                    gameState.player.y + gameState.player.height / 2 > enemy.y - enemy.height / 2) {
+                    
+                    if (gameState.playerShieldActive) {
+                        gameState.playerShieldActive = false; 
+                        createParticles(enemy.x, enemy.y, enemy.color); 
+                        gameState.score += enemy.score; 
+                         gameState.scoreDisplays.push({
+                            x: enemy.x,
+                            y: enemy.y,
+                            score: enemy.score,
+                            age: 0
+                        });
+                        const enemyIndex = gameState.enemies.indexOf(enemy);
+                        if (enemyIndex > -1) {
+                            gameState.enemies.splice(enemyIndex, 1);
+                        }
+                        playShieldBlockSound(); 
+                    } else {
+                        if (!gameState.isGameOver) { 
+                            playPlayerHitSound();
+                        }
+                        gameState.isGameOver = true;
+                        gameState.isShaking = true;
+                        gameState.shakeStartTime = Date.now();
+                    }
+                }
+            });
+            
+            // Player vs Boss collision (Direct contact)
+            if (gameState.boss && gameState.boss.active &&
+                gameState.player.x - gameState.player.width / 2 < gameState.boss.x + gameState.boss.width / 2 &&
+                gameState.player.x + gameState.player.width / 2 > gameState.boss.x - gameState.boss.width / 2 &&
+                gameState.player.y - gameState.player.height / 2 < gameState.boss.y + gameState.boss.height / 2 &&
+                gameState.player.y + gameState.player.height / 2 > gameState.boss.y - gameState.boss.height / 2) {
+                
+                if (gameState.playerShieldActive) {
+                    gameState.playerShieldActive = false;
+                    playShieldBlockSound();
+                    gameState.boss.hp -= 25; 
+                     if (gameState.boss.hp <= 0) {
+                        createParticles(gameState.boss.x, gameState.boss.y, gameState.boss.color, 10);
+                        gameState.score += 1000; 
+                        gameState.boss.active = false;
+                        gameState.boss = null;
+                        gameState.isShaking = true; 
+                        gameState.shakeStartTime = Date.now();
+                        gameState.shakeDuration = 800;
+                    }
+                } else {
+                    if (!gameState.isGameOver) {
+                        playPlayerHitSound();
+                    }
+                    gameState.isGameOver = true;
+                    gameState.isShaking = true;
+                    gameState.shakeStartTime = Date.now();
+                }
+            }
+
+            // Player vs Enemy Bullets
+            for (let i = gameState.enemyBullets.length - 1; i >= 0; i--) {
+                const bullet = gameState.enemyBullets[i];
+                if (gameState.player.x - gameState.player.width / 2 < bullet.x + bullet.width / 2 &&
+                    gameState.player.x + gameState.player.width / 2 > bullet.x - bullet.width / 2 &&
+                    gameState.player.y - gameState.player.height / 2 < bullet.y + bullet.height / 2 &&
+                    gameState.player.y + gameState.player.height / 2 > bullet.y - bullet.height / 2) {
+                    
+                    gameState.enemyBullets.splice(i, 1); 
+                    if (gameState.playerShieldActive) {
+                        gameState.playerShieldActive = false; 
+                        playShieldBlockSound(); 
+                    } else {
+                        if (!gameState.isGameOver) { 
+                           playPlayerHitSound();
+                        }
+                        gameState.isGameOver = true;
+                        gameState.isShaking = true;
+                        gameState.shakeStartTime = Date.now();
+                    }
+                    break;
+                }
+            }
+        }
+
+        function checkEscapedEnemies() { // Already grouped logically
+            const escapedEnemies = gameState.enemies.filter(enemy => enemy.y > canvas.height);
+            escapedEnemies.forEach(enemy => {
+                const penaltyScore = 5;
+                gameState.score = Math.max(0, gameState.score - penaltyScore);
+                gameState.penaltyScores.push({
+                    x: enemy.x,
+                    y: canvas.height,
+                    score: penaltyScore,
+                    age: 0
+                });
+            });
+            gameState.enemies = gameState.enemies.filter(enemy => enemy.y <= canvas.height);
+        }
+
         function checkPowerUpCollisions() {
             for (let i = gameState.powerUps.length - 1; i >= 0; i--) {
                 const powerUp = gameState.powerUps[i];
@@ -336,99 +765,213 @@
                     gameState.player.x + gameState.player.width / 2 > powerUp.x - powerUp.width / 2 &&
                     gameState.player.y - gameState.player.height / 2 < powerUp.y + powerUp.height / 2 &&
                     gameState.player.y + gameState.player.height / 2 > powerUp.y - powerUp.height / 2) {
-                    gameState.powerUps.splice(i, 1);
-                    gameState.powerUpActive = true;
-                    gameState.powerUpEndTime = Date.now() + 6000; // 6秒間
+                    
+                    if (powerUp.type === 'shield') {
+                        playShieldActivateSound();
+                    } else if (powerUp.type === 'bomb') {
+                        playBombSound();
+                    } else if (powerUp.type === 'rapidFire') {
+                        playPowerUpCollectSound();
+                    } 
+
+                    if (powerUp.type === 'rapidFire') {
+                        gameState.powerUpActive = true; 
+                        gameState.powerUpEndTime = Date.now() + powerUp.duration;
+                    } else if (powerUp.type === 'shield') {
+                        gameState.playerShieldActive = true;
+                    } else if (powerUp.type === 'bomb') {
+                        for (let k = gameState.enemies.length - 1; k >= 0; k--) {
+                            const enemy = gameState.enemies[k];
+                            gameState.score += enemy.score;
+                            gameState.scoreDisplays.push({
+                                x: enemy.x,
+                                y: enemy.y,
+                                score: enemy.score,
+                                age: 0
+                            });
+                            createParticles(enemy.x, enemy.y, enemy.color);
+                        }
+                        gameState.enemies = []; 
+                    }
+                    gameState.powerUps.splice(i, 1); 
                 }
             }
         }
 
-        function autoShoot() {
-            const currentTime = Date.now();
-            const shootInterval = gameState.powerUpActive ? 10 : 100; // パワーアップ中は10ms間隔で発射
-            if (currentTime - gameState.lastShotTime >= shootInterval) {
-                gameState.bullets.push({
-                    x: gameState.player.x,
-                    y: gameState.player.y - gameState.player.height / 2
-                });
-                gameState.lastShotTime = currentTime;
+        // --- Sound Effect Functions ---
+        function playSound({
+            type = 'sine', 
+            frequency = 440, 
+            duration = 0.1, 
+            volume = 0.1, 
+            attack = 0.005, 
+            decay = 0.05,   
+            freqSweepAmount = 0, 
+            sweepType = 'linear' 
+        }) {
+            if (!audioCtx || audioCtx.state === 'suspended' || !audioCtx.destination) return;
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            const now = audioCtx.currentTime;
+            const attackTime = duration * attack; 
+            oscillator.type = type;
+            oscillator.frequency.setValueAtTime(frequency, now);
+            if (freqSweepAmount !== 0) {
+                const targetFrequency = frequency + freqSweepAmount;
+                if (sweepType === 'linear') {
+                    oscillator.frequency.linearRampToValueAtTime(targetFrequency, now + duration);
+                } else { 
+                    oscillator.frequency.exponentialRampToValueAtTime(Math.max(0.0001, targetFrequency), now + duration);
+                }
             }
+            gainNode.gain.setValueAtTime(0, now); 
+            gainNode.gain.linearRampToValueAtTime(volume, now + attackTime); 
+            const decayStartPoint = now + attackTime;
+            if (decayStartPoint < now + duration) {
+                 gainNode.gain.setTargetAtTime(0.0001, decayStartPoint, (now + duration - decayStartPoint) / 5); 
+            } else { 
+                 gainNode.gain.setValueAtTime(0.0001, now + duration);
+            }
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            oscillator.start(now);
+            oscillator.stop(now + duration);
+        }
+
+        function playShootSound() {
+            playSound({ type: 'triangle', frequency: 700, duration: 0.07, volume: 0.04, attack: 0.01, decay: 0.8, freqSweepAmount: -150 });
+        }
+
+        function playExplosionSound() {
+            playSound({ type: 'sawtooth', frequency: 300, duration: 0.25, volume: 0.09, attack: 0.02, decay: 0.7, freqSweepAmount: -200 });
+        }
+
+        function playPlayerHitSound() {
+            playSound({ type: 'square', frequency: 200, duration: 0.35, volume: 0.12, attack: 0.01, decay: 0.6, freqSweepAmount: -100 });
+        }
+
+        function playShieldBlockSound() {
+            playSound({ type: 'sine', frequency: 450, duration: 0.18, volume: 0.08, attack: 0.01, decay: 0.7, freqSweepAmount: 100 });
+        }
+
+        function playPowerUpCollectSound() { 
+            playSound({ type: 'sine', frequency: 550, duration: 0.15, volume: 0.09, attack: 0.01, decay: 0.6, freqSweepAmount: 300 });
+        }
         
-            // パワーアップの終了チェック
-            if (gameState.powerUpActive && currentTime > gameState.powerUpEndTime) {
-                gameState.powerUpActive = false;
-            }
+        function playShieldActivateSound() { 
+            playSound({ type: 'sine', frequency: 650, duration: 0.3, volume: 0.1, attack: 0.01, decay: 0.5, freqSweepAmount: 400, sweepType: 'linear' });
+        }
+
+        function playBombSound() {
+            playSound({ type: 'sawtooth', frequency: 450, duration: 0.8, volume: 0.18, attack: 0.03, decay: 0.4, freqSweepAmount: -400 });
+        }
+
+        function playBossHitSound() {
+            playSound({ type: 'square', frequency: 150, duration: 0.15, volume: 0.1, attack: 0.005, decay: 0.1, freqSweepAmount: -50 });
         }
         
-        function gameLoop() {
-            drawBackground();
-            
-            if (!gameState.isGameOver) {
-                moveEnemies();
-                checkEscapedEnemies();
-                moveBullets();
-                spawnEnemy();
-                checkCollisions();
-                autoShoot();
-                movePowerUps(); // 追加
-                spawnPowerUp(); // 追加
-                checkPowerUpCollisions(); // 追加
-
-                drawPlayer();
-                drawBullets();
-                drawEnemies();
-                drawScore();
-                drawScoreDisplays();
-                drawPenaltyScores();
-                drawPowerUps(); // 追加
-            } else {
-                drawGameOver();
-            }
-            
-            requestAnimationFrame(gameLoop);
-        }
-
-        function initGame() {
-            canvas = document.getElementById('gameCanvas');
-            ctx = canvas.getContext('2d');
-            
-            gameState.player.x = canvas.width / 2;
-            gameState.player.y = canvas.height - 50;
-
-            canvas.addEventListener('mousemove', (e) => {
-                if (!gameState.isGameOver) {
-                    const rect = canvas.getBoundingClientRect();
-                    gameState.player.x = e.clientX - rect.left;
-                }
+        // --- Utility Functions ---
+        function hexToRgb(hex) {
+            var shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
+            hex = hex.replace(shorthandRegex, function(m, r, g, b) {
+                return r + r + g + g + b + b;
             });
-
-            canvas.addEventListener('click', () => {
-                if (gameState.isGameOver) {
-                    restartGame();
-                }
-            });
-
-            gameLoop();
+            var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? {
+                r: parseInt(result[1], 16),
+                g: parseInt(result[2], 16),
+                b: parseInt(result[3], 16)
+            } : null;
         }
 
-        function restartGame() {
-            gameState.player.x = canvas.width / 2;
-            gameState.bullets = [];
-            gameState.enemies = [];
-            gameState.scoreDisplays = [];
-            gameState.penaltyScores = [];
-            gameState.isGameOver = false;
-            gameState.score = 0;
-            gameState.lastShotTime = 0;
-            gameState.powerUps = [];
-            gameState.powerUpActive = false;
-            gameState.powerUpEndTime = 0;
-
-            ctx.textAlign = 'left';
-            ctx.textBaseline = 'alphabetic';
-        }
-
+        // Game Entry Point
         document.addEventListener('DOMContentLoaded', initGame);
+
+        // --- Unit Testing ---
+        function assertEqual(actual, expected, testName) {
+            if (actual === expected) {
+                console.log(`PASSED: ${testName}`);
+            } else {
+                console.error(`FAILED: ${testName}. Expected ${expected}, but got ${actual}.`);
+                console.trace(); // Provides stack trace for easier debugging
+            }
+        }
+
+        function testPlayerBulletEnemyCollision() {
+            console.log("Running: testPlayerBulletEnemyCollision");
+            // Setup: Ensure canvas and context are available for any functions that might use them indirectly
+            if (!canvas) { // Basic check, assumes initGame() might not have run if tests are external
+                canvas = { width: 400, height: 600 }; // Mock if necessary
+            }
+
+            // 1. Initial state
+            const initialScore = gameState.score;
+            const enemyScoreValue = 50; // Example score
+            gameState.enemies = [{ x: 100, y: 100, width: 20, height: 20, score: enemyScoreValue, type: 'normal' }];
+            gameState.bullets = [{ x: 100, y: 100, width: 5, height: 10 }]; // Positioned to hit
+
+            // 2. Action
+            checkCollisions();
+
+            // 3. Assertions
+            assertEqual(gameState.enemies.length, 0, "testPlayerBulletEnemyCollision - Enemy should be removed");
+            assertEqual(gameState.bullets.length, 0, "testPlayerBulletEnemyCollision - Bullet should be removed");
+            assertEqual(gameState.score, initialScore + enemyScoreValue, "testPlayerBulletEnemyCollision - Score should increase");
+
+            // Cleanup
+            gameState.enemies = [];
+            gameState.bullets = [];
+            gameState.score = initialScore; // Reset score if other tests depend on it
+        }
+
+        function testBossHpReduction() {
+            console.log("Running: testBossHpReduction");
+            // Setup: Ensure canvas and context are available
+             if (!canvas) { // Basic check
+                canvas = { width: 400, height: 600 }; // Mock if necessary
+            }
+            spawnBoss(); // Initialize boss
+            if (!gameState.boss) { // Guard against spawnBoss not creating a boss
+                 console.error("FAILED: testBossHpReduction - Boss not spawned.");
+                 return;
+            }
+
+            const initialBossHp = gameState.boss.hp;
+            const bulletDamage = 1; // As per current collision logic (boss.hp -= 1)
+            gameState.bullets = [{ x: gameState.boss.x, y: gameState.boss.y, width: 5, height: 10 }]; // Positioned to hit boss
+
+            // Action
+            checkCollisions();
+
+            // Assertions
+            if (gameState.boss) { // Boss might be null if defeated and logic is fully implemented
+                 assertEqual(gameState.boss.hp, initialBossHp - bulletDamage, "testBossHpReduction - Boss HP should be reduced");
+            } else {
+                 // This case might occur if the boss is defeated with 1 HP and the test setup isn't precise enough
+                 // For now, consider it a pass if the boss is gone and HP was low
+                 assertEqual(initialBossHp, bulletDamage, "testBossHpReduction - Boss defeated (HP was low)");
+            }
+            assertEqual(gameState.bullets.length, 0, "testBossHpReduction - Bullet should be removed after hitting boss");
+            
+            // Cleanup
+            gameState.boss = null; // Important for other tests or game restart
+            gameState.bullets = [];
+        }
+
+        function runTests() {
+            console.log("--- Running Unit Tests ---");
+            // Call individual test functions here
+            testPlayerBulletEnemyCollision();
+            testBossHpReduction(); 
+            // Add more test calls as they are created
+            console.log("--- Unit Tests Finished ---");
+        }
+
+        // Game Entry Point - Modified to run tests after game init
+        document.addEventListener('DOMContentLoaded', () => {
+            initGame();
+            runTests(); // Call tests after game is initialized
+        });
     </script>
 </body>
 </html>
