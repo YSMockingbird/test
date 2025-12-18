@@ -79,10 +79,15 @@
         const backgroundPattern = createBackgroundPattern(); // Create pattern once after function is defined
 
         // --- Initialization Functions ---
+        let isInitialized = false;
+
         function initGame() {
+            if (isInitialized) return;
+            isInitialized = true;
+
             canvas = document.getElementById('gameCanvas');
             ctx = canvas.getContext('2d');
-            initAudio(); 
+            initAudio();
             
             gameState.player.x = canvas.width / 2;
             gameState.player.y = canvas.height - 50;
@@ -883,9 +888,6 @@
                 b: parseInt(result[3], 16)
             } : null;
         }
-
-        // Game Entry Point
-        document.addEventListener('DOMContentLoaded', initGame);
 
         // --- Unit Testing ---
         function assertEqual(actual, expected, testName) {
